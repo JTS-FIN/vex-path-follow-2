@@ -135,7 +135,7 @@ task main()
 			seenTapeDuration = 0;
 			setTouchLEDColor(port2, colorRed);
 
-			setMotorSpeed(motor1, turningSpeed *  rotationDirection);
+			setMotorSpeed(motor1, turningSpeed * rotationDirection);
 			setMotorSpeed(motor6, turningSpeed * -1 * rotationDirection);
 			displayTextLine(4, "Turning to tape %d", rotationDirection);
 			setTouchLEDColor(port5, colorNone);
