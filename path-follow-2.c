@@ -24,35 +24,65 @@
 #define STATE_ARRIVED_ON_TAPE 6
 #define NUMBER_OF_RUNS 2
 
-void startLap(int *movementSpeed) {
-		*movementSpeed = BASE_MOVEMENT_SPEED;
-		setMotorSpeed(motor1, *movementSpeed);
-		setMotorSpeed(motor6, *movementSpeed);
+typedef struct {
+  int startTimes[NUMBER_OF_RUNS];
+  int endTimes[NUMBER_OF_RUNS];
+  int currentLap;
+} lapRecorder;
+
+void startLap(int *movementSpeed, lapRecorder *lapTimes) {
+	lapTimes->startTimes[lapTimes->currentLap] = nPgmTime;
+	*movementSpeed = BASE_MOVEMENT_SPEED;
+	setMotorSpeed(motor1, *movementSpeed);
+	setMotorSpeed(motor6, *movementSpeed);
 }
 
-void endLap(int *currentState, int *runEndTime, int *runStartTime) {
-	static int runNumber = 0;
-	if (runNumber == NUMBER_OF_RUNS - 1) {
-		*currentState = STATE_RUN_ENDED;
-		*runEndTime = nPgmTime;
+void endLap(lapRecorder *lapTimes) {
+	lapTimes->endTimes[lapTimes->currentLap] = nPgmTime;
+	lapTimes->currentLap++;
+}
+
+void ON_BASE(int *currentState, int *movementSpeed, lapRecorder *lapTimes) {
+	resetGyro(port4);
+
+	// If starttime for the lap hasnt been set, we start a new lap
+	if (lapTimes->startTimes[lapTimes->currentLap] == 0) {
+		startLap(movementSpeed, lapTimes);
 	}
-	else {
-		*currentState = STATE_ON_BASE;
-		runNumber++;
-		*runStartTime = nPgmTime;
+	// If it is more than 10sec since we started the lap, and we are still in base
+	// then we have already made the lap
+	else if (nPgmTime - lapTimes->startTimes[lapTimes->currentLap] > 10000) {
+		endLap(lapTimes);
 	}
 }
 
+void ARRIVED_ON_TAPE(int *timeArrivedOnTape) {
+	resetGyro(port4);
+	*timeArrivedOnTape = nPgmTime;
+}
+
+void ON_TAPE(int *timeArrivedOnTape, int *movementSpeed, int *recurringRotationDirectionChanges, int *turningSpeed, int *maxRotationDegrees) {
+	float seenTapeDuration = nPgmTime - *timeArrivedOnTape;
+	*movementSpeed = BASE_MOVEMENT_SPEED + (seenTapeDuration / 1000) * 20;
+	if (*movementSpeed > MAX_MOVEMENT_SPEED) {
+		*movementSpeed = MAX_MOVEMENT_SPEED;
+	}
+	setTouchLEDColor(port2, colorGreen);
+	setMotorSpeed(motor1, *movementSpeed);
+	setMotorSpeed(motor6, *movementSpeed);
+
+	*recurringRotationDirectionChanges = 0;
+	resetGyro(port4);
+	*maxRotationDegrees = MAX_ROTATION_DEGREES_STAGE1;
+	*turningSpeed = TURNING_SPEED_STAGE1;
+}
 
 
 task main()
 {
 	setColorMode(port3, colorTypeRGB_Hue_Reflected);
-	int notSeenTapeCount = 0;
 	float seenTapeDuration;
 	int timeArrivedOnTape;
-	int unsigned long runStartTime = 0;
-	int unsigned long runEndTime = 0;
 	int movementSpeed = 0;
 	int turningSpeed = TURNING_SPEED_STAGE1;
 	int currentState = STATE_RUN_NOT_STARTED;
@@ -61,95 +91,73 @@ task main()
 	int maxRotationDegrees = MAX_ROTATION_DEGREES_STAGE1;
 	int recurringRotationDirectionChanges = 0;
 	int i = 0;
-	int runNumber = 1;
-	int startTimesArray[NUMBER_OF_RUNS];
-	int endTimesArray[NUMBER_OF_RUNS];
+	lapRecorder lapTimes;
+	for (int k = 0; k < NUMBER_OF_RUNS; k++) {
+		lapTimes.startTimes[k] = 0;
+		lapTimes.endTimes[k] = 0;
+	}
+	lapTimes.currentLap = 0;
 
 	while (1) {
 		int redValue = getColorRedChannel(port3);
 		int blueValue = getColorBlueChannel(port3);
 		int greenValue = getColorGreenChannel(port3);
 		int combinedColorValue = redValue + blueValue + greenValue;
-		int runTime = nPgmTime;
-		if (currentState == STATE_RUN_ENDED) {
-			runTime = runEndTime;
 
+		// ==============================
+		// Start of state switching logic
+		if (lapTimes.currentLap == NUMBER_OF_RUNS) {
+			currentState = STATE_RUN_ENDED;
+		}
+		else {
+			if (35 < redValue && redValue < 45 && 35 < blueValue && blueValue < 45) {
+				currentState = STATE_ON_BASE;
+				currentStateString = "On base";
+			}
+			else if (currentState != STATE_RUN_NOT_STARTED) {
+				if (combinedColorValue < 300 && currentState == STATE_OUT_OF_TRACK) {
+					currentState = STATE_ARRIVED_ON_TAPE;
+					currentStateString = "Arrived on tape";
+				}
+				else if (combinedColorValue < 300 && currentState == STATE_ARRIVED_ON_TAPE) {
+					currentState = STATE_ON_TAPE;
+					currentStateString = "On tape";
+				}
+				else if (combinedColorValue > 300) {
+					currentState = STATE_OUT_OF_TRACK;
+					currentStateString = "Out of track";
+				}
+			}
+		}
+		// End of state switching logic
+
+		// ===========================
+		// Start of calling state logic
+		if (currentState == STATE_RUN_ENDED) {
 			setMotorSpeed(motor1, 0);
 			setMotorSpeed(motor6, 0);
-			displayTextLine(0, "Run endeded");
-			displayTextLine(1, "Runtime: %d", (runTime - runStartTime) / 1000);
-			displayTextLine(2, "\o/ \O/");
-			displayTextLine(3, "woo WOO woo!!1");
-			displayTextLine(4, "mage on ylbee xD");
+			for (int k = 0; k < NUMBER_OF_RUNS; k++) {
+				displayTextLine(k, "Lap %d: %d", k, (lapTimes.endTimes[k] - lapTimes.startTimes[k]) / 1000);
+			}
 			i++;
-			if (i % 80 == 0) {
+			if (i % 160 == 0) {
 				setTouchLEDColor(port2, colorGreen);
 				setTouchLEDColor(port5, colorRed);
 			}
-			else if (i % 40 == 0) {
+			else if (i % 80 == 0) {
 				setTouchLEDColor(port2, colorRed);
 				setTouchLEDColor(port5, colorGreen);
 			}
 			continue;
 		}
-		if (35 < redValue && redValue < 45 && 35 < blueValue && blueValue < 45) {
-			currentState = STATE_ON_BASE;
-			currentStateString = "On base";
-		}
-		else if (currentState == STATE_RUN_NOT_STARTED) {
-			//woot
-		}
-		else if (combinedColorValue < 300 && currentState == STATE_OUT_OF_TRACK) {
-			currentState = STATE_ARRIVED_ON_TAPE;
-			currentStateString = "Arrived on tape";
-		}
-		else if (combinedColorValue < 300 && currentState == STATE_ARRIVED_ON_TAPE) {
-			currentState = STATE_ON_TAPE;
-			currentStateString = "On tape";
-		}
-		else if (combinedColorValue > 300) {
-			currentState = STATE_OUT_OF_TRACK;
-			currentStateString = "Out of track";
-		}
-
-		displayTextLine(0, "Runstate: %s", currentStateString);
-		displayTextLine(1, "Current speed: %d", movementSpeed);
-		displayTextLine(2, "Running time: %d", (runTime - runStartTime) / 1000);
-		displayTextLine(3, "Gyro: %d", abs(getGyroDegrees(port4)));
-
-		if (currentState == STATE_ON_BASE) {
-			// Alustetaan aloitusaika
-			if (runStartTime == 0) {
-				runStartTime = nPgmTime;
-				resetGyro(port4);
-			}
-			// Ollaan alussa, mennään pois lähtöpisteeltä
-			// AIKAA KYMMENEN SEKUNTIAA!!!
-			if (nPgmTime - runStartTime < 10000) {
-				startLap(&movementSpeed);
-			}
-			else {
-				endLap(&currentState, &runEndTime, &runStartTime);
-			}
+		else if (currentState == STATE_ON_BASE) {
+			ON_BASE(&currentState, &movementSpeed, &lapTimes);
 		}
 		else if (currentState == STATE_ARRIVED_ON_TAPE) {
-			resetGyro(port4);
-			timeArrivedOnTape = nPgmTime;
+			ARRIVED_ON_TAPE(&timeArrivedOnTape);
 		}
 		else if (currentState == STATE_ON_TAPE) {
-			seenTapeDuration = nPgmTime - timeArrivedOnTape;
-			movementSpeed = BASE_MOVEMENT_SPEED + (seenTapeDuration / 1000) * 20;
-			if (movementSpeed > MAX_MOVEMENT_SPEED) {
-				movementSpeed = MAX_MOVEMENT_SPEED;
-			}
-			setTouchLEDColor(port2, colorGreen);
-			setMotorSpeed(motor1, movementSpeed);
-			setMotorSpeed(motor6, movementSpeed);
-			notSeenTapeCount = 0;
-			recurringRotationDirectionChanges = 0;
-			resetGyro(port4);
-			maxRotationDegrees = MAX_ROTATION_DEGREES_STAGE1;
-			turningSpeed = TURNING_SPEED_STAGE1;
+			ON_TAPE(&timeArrivedOnTape, &movementSpeed, &recurringRotationDirectionChanges, &turningSpeed, &maxRotationDegrees);
 		}
 		else if (currentState == STATE_OUT_OF_TRACK) {
 			seenTapeDuration = 0;
@@ -179,7 +187,16 @@ task main()
 				turningSpeed = TURNING_SPEED_STAGE2;
 			}
 		}
+		// End of calling state logic
+
+		// =====================
+		// Start of screen update
+		displayTextLine(0, "Runstate: %s", currentStateString);
+		displayTextLine(1, "Lap number: %d", lapTimes.currentLap);
+		displayTextLine(3, "Gyro: %d", abs(getGyroDegrees(port4)));
+		// End of screen update
 	}
+
 
 }
 
