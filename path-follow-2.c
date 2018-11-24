@@ -22,6 +22,28 @@
 #define STATE_RUN_ENDED 4
 #define STATE_RUN_NOT_STARTED 5
 #define STATE_ARRIVED_ON_TAPE 6
+#define NUMBER_OF_RUNS 2
+
+void startLap(int *movementSpeed) {
+		*movementSpeed = BASE_MOVEMENT_SPEED;
+		setMotorSpeed(motor1, *movementSpeed);
+		setMotorSpeed(motor6, *movementSpeed);
+}
+
+void endLap(int *currentState, int *runEndTime, int *runStartTime) {
+	static int runNumber = 0;
+	if (runNumber == NUMBER_OF_RUNS - 1) {
+		*currentState = STATE_RUN_ENDED;
+		*runEndTime = nPgmTime;
+	}
+	else {
+		*currentState = STATE_ON_BASE;
+		runNumber++;
+		*runStartTime = nPgmTime;
+	}
+}
+
+
 
 task main()
 {
@@ -39,6 +61,10 @@ task main()
 	int maxRotationDegrees = MAX_ROTATION_DEGREES_STAGE1;
 	int recurringRotationDirectionChanges = 0;
 	int i = 0;
+	int runNumber = 1;
+	int startTimesArray[NUMBER_OF_RUNS];
+	int endTimesArray[NUMBER_OF_RUNS];
+
 	while (1) {
 		int redValue = getColorRedChannel(port3);
 		int blueValue = getColorBlueChannel(port3);
@@ -98,18 +124,12 @@ task main()
 				resetGyro(port4);
 			}
 			// Ollaan alussa, mennään pois lähtöpisteeltä
-			// AIKAA KAKSI SEKUNTIAA!!!
+			// AIKAA KYMMENEN SEKUNTIAA!!!
 			if (nPgmTime - runStartTime < 10000) {
-				movementSpeed = BASE_MOVEMENT_SPEED;
-				setMotorSpeed(motor1, movementSpeed);
-				setMotorSpeed(motor6, movementSpeed);
+				startLap(&movementSpeed);
 			}
 			else {
-				if (runEndTime == 0) {
-					runEndTime = nPgmTime;
-				}
-				currentState = STATE_RUN_ENDED;
-				continue;
+				endLap(&currentState, &runEndTime, &runStartTime);
 			}
 		}
 		else if (currentState == STATE_ARRIVED_ON_TAPE) {
@@ -160,4 +180,8 @@ task main()
 			}
 		}
 	}
+
 }
+
+
+
